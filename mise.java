@@ -1,5 +1,5 @@
 org.springframework.ai.chat.client.advisor.RetrievalAugmentationAdvisor
-
+//异步任务
 public AdvisedRequest before(AdvisedRequest request) {
 		Map<String, Object> context = new HashMap<>(request.adviseContext());
 
