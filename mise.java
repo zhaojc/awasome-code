@@ -136,3 +136,41 @@ public class FilterExpressionBuilder {
 	}
 
 }
+
+
+//链式流程定义
+private ApiCall<ApiResponse<AlbumObject>, ApiException> prepareGetAnAlbumRequest(
+            final String id,
+            final String market) throws IOException {
+        return new ApiCall.Builder<ApiResponse<AlbumObject>, ApiException>()
+                .globalConfig(getGlobalConfiguration())
+                .requestBuilder(requestBuilder -> requestBuilder
+                        .server(Server.ENUM_DEFAULT.value())
+                        .path("/albums/{id}")
+                        .queryParam(param -> param.key("market")
+                                .value(market).isRequired(false))
+                        .templateParam(param -> param.key("id").value(id)
+                                .shouldEncode(true))
+                        .headerParam(param -> param.key("accept").value("application/json"))
+                        .withAuth(auth -> auth
+                                .add("oauth_2_0"))
+                        .arraySerializationFormat(ArraySerializationFormat.CSV)
+                        .httpMethod(HttpMethod.GET)
+                )
+                .responseHandler(responseHandler -> responseHandler
+                        .responseClassType(ResponseClassType.API_RESPONSE)
+                        .apiResponseDeserializer(
+                                response -> ApiHelper.deserialize(response, AlbumObject.class))
+                        .nullify404(false)
+                        .localErrorCase("401",
+                                ErrorCase.setReason("Bad or expired token. This can happen if the user revoked a token or\nthe access token has expired. You should re-authenticate the user.\n",
+                                        (reason, context) -> new UnauthorizedException(reason, context)))
+                        .localErrorCase("403",
+                                ErrorCase.setReason("Bad OAuth request (wrong consumer key, bad nonce, expired\ntimestamp...). Unfortunately, re-authenticating the user won't help here.\n",
+                                        (reason, context) -> new ForbiddenException(reason, context)))
+                        .localErrorCase("429",
+                                ErrorCase.setReason("The app has exceeded its rate limits.\n",
+                                        (reason, context) -> new TooManyRequestsException(reason, context)))
+                        .globalErrorCase(GLOBAL_ERROR_CASES))
+                .build();
+    }
