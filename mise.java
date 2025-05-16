@@ -174,3 +174,10 @@ private ApiCall<ApiResponse<AlbumObject>, ApiException> prepareGetAnAlbumRequest
                         .globalErrorCase(GLOBAL_ERROR_CASES))
                 .build();
     }
+
+ //user请求自动符值
+  @Bean
+  @Scope(value = WebApplicationContext.SCOPE_REQUEST, proxyMode = ScopedProxyMode.TARGET_CLASS)
+  public User.UserBuilder callerBuilder() {
+    return User.builder();
+  }
