@@ -191,3 +191,16 @@ public interface HttpClientFactory<T> {
 //aws-sdk-java
 public class ApacheHttpClientFactory implements HttpClientFactory<ConnectionManagerAwareHttpClient> {
 }
+
+//eventstore expression
+   void testSelectWhere() {
+        SelectBuilder builder = new SelectBuilder(database, of(COL_T1_01, COL_T1_02, COL_T1_03));
+        builder.from(TABLE_T1);
+        builder.where(eq(COL_T1_02));
+        assertEquals("SELECT col_T1_01,col_T1_02,col_T1_03 FROM T1 WHERE col_T1_02=?", builder.<SqlQuery>build().sql());
+
+        builder = new SelectBuilder(database, of(COL_T1_01, COL_T1_02, COL_T1_03));
+        builder.from(TABLE_T1);
+        builder.where(and(eq(COL_T1_02), eq(COL_T1_03)));
+        assertEquals("SELECT col_T1_01,col_T1_02,col_T1_03 FROM T1 WHERE (col_T1_02=? AND col_T1_03=?)", builder.<SqlQuery>build().sql());
+    }
