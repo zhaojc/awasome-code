@@ -181,3 +181,13 @@ private ApiCall<ApiResponse<AlbumObject>, ApiException> prepareGetAnAlbumRequest
   public User.UserBuilder callerBuilder() {
     return User.builder();
   }
+
+//factory返回值不固定
+public interface HttpClientFactory<T> {
+
+    T create(HttpClientSettings settings);
+
+}
+//aws-sdk-java
+public class ApacheHttpClientFactory implements HttpClientFactory<ConnectionManagerAwareHttpClient> {
+}
