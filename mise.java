@@ -204,3 +204,26 @@ public class ApacheHttpClientFactory implements HttpClientFactory<ConnectionMana
         builder.where(and(eq(COL_T1_02), eq(COL_T1_03)));
         assertEquals("SELECT col_T1_01,col_T1_02,col_T1_03 FROM T1 WHERE (col_T1_02=? AND col_T1_03=?)", builder.<SqlQuery>build().sql());
     }
+
+//enenvstrorm antlr4
+    public static PageRequest parse(String query, EvaluatorDefinition evaluatorDefinition) {
+
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("parseQuery [{}]", query);
+        }
+
+        if (Strings.isEmpty(query)) {
+            throw new PageRequestException(PageRequestException.Type.EMPTY, ImmutableMap.of());
+        }
+
+        RequestContext ctx = parse(query);
+
+        PageRequestBuilder builder = parseRange(query, ctx.range());
+        parseFilter(builder, ctx.filter(), evaluatorDefinition);
+        parseSort(builder, ctx.sort());
+
+        builder.withEvaluator(evaluatorDefinition);
+
+        return builder.build();
+    }
+
