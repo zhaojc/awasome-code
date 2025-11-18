@@ -701,4 +701,214 @@ public final class JdbcOneTimeTokenService implements OneTimeTokenService, Dispo
 	}
 
 }
+//任务编排
+
+    public TaskBuilder initTasks(final InitStrategy initStrategy) {
+        TaskBuilder builder;
+        if (!pluginListed) {
+            builder = new TaskGraphBuilder() {
+                List<File> archives;
+                Collection<String> bundledPlugins;
+
+                {
+                    Handle loadBundledPlugins = add("Loading bundled plugins", new Executable() {
+                        @Override
+                        public void run(Reactor session) throws Exception {
+                            bundledPlugins = loadBundledPlugins();
+                        }
+                    });
+
+                    Handle listUpPlugins = requires(loadBundledPlugins).add("Listing up plugins", new Executable() {
+                        @Override
+                        public void run(Reactor session) throws Exception {
+                            archives = initStrategy.listPluginArchives(PluginManager.this);
+                        }
+                    });
+
+                    requires(listUpPlugins).attains(PLUGINS_LISTED).add("Preparing plugins", new Executable() {
+                        @Override
+                        public void run(Reactor session) throws Exception {
+                            // once we've listed plugins, we can fill in the reactor with plugin-specific initialization tasks
+                            TaskGraphBuilder g = new TaskGraphBuilder();
+
+                            final Map<String, File> inspectedShortNames = new HashMap<>();
+
+                            for (final File arc : archives) {
+                                g.followedBy().notFatal().attains(PLUGINS_LISTED).add("Inspecting plugin " + arc, new Executable() {
+                                    @Override
+                                    public void run(Reactor session1) throws Exception {
+                                        try {
+                                            PluginWrapper p = strategy.createPluginWrapper(arc);
+                                            if (isDuplicate(p)) return;
+
+                                            p.isBundled = containsHpiJpi(bundledPlugins, arc.getName());
+                                            plugins.add(p);
+                                        } catch (IOException e) {
+                                            failedPlugins.add(new FailedPlugin(arc.getName(), e));
+                                            throw e;
+                                        }
+                                    }
+
+                                    /**
+                                     * Inspects duplication. this happens when you run hpi:run on a bundled plugin,
+                                     * as well as putting numbered jpi files, like "cobertura-1.0.jpi" and "cobertura-1.1.jpi"
+                                     */
+                                    private boolean isDuplicate(PluginWrapper p) {
+                                        String shortName = p.getShortName();
+                                        if (inspectedShortNames.containsKey(shortName)) {
+                                            LOGGER.info("Ignoring " + arc + " because " + inspectedShortNames.get(shortName) + " is already loaded");
+                                            return true;
+                                        }
+
+                                        inspectedShortNames.put(shortName, arc);
+                                        return false;
+                                    }
+                                });
+                            }
+
+                            g.followedBy().attains(PLUGINS_LISTED).add("Checking cyclic dependencies", new Executable() {
+                                /**
+                                 * Makes sure there's no cycle in dependencies.
+                                 */
+                                @Override
+                                public void run(Reactor reactor) throws Exception {
+                                    try {
+                                        CyclicGraphDetector<PluginWrapper> cgd = new CyclicGraphDetector<>() {
+                                            @Override
+                                            protected List<PluginWrapper> getEdges(PluginWrapper p) {
+                                                List<PluginWrapper> next = new ArrayList<>();
+                                                addTo(p.getDependencies(), next);
+                                                addTo(p.getOptionalDependencies(), next);
+                                                return next;
+                                            }
+
+                                            private void addTo(List<Dependency> dependencies, List<PluginWrapper> r) {
+                                                for (Dependency d : dependencies) {
+                                                    PluginWrapper p = getPlugin(d.shortName);
+                                                    if (p != null)
+                                                        r.add(p);
+                                                }
+                                            }
+
+                                            @Override
+                                            protected void reactOnCycle(PluginWrapper q, List<PluginWrapper> cycle) {
+
+                                                LOGGER.log(Level.SEVERE, "found cycle in plugin dependencies: (root=" + q + ", deactivating all involved) " + cycle.stream().map(Object::toString).collect(Collectors.joining(" -> ")));
+                                                for (PluginWrapper pluginWrapper : cycle) {
+                                                    pluginWrapper.setHasCycleDependency(true);
+                                                    failedPlugins.add(new FailedPlugin(pluginWrapper, new CycleDetectedException(cycle)));
+                                                }
+                                            }
+
+                                        };
+                                        cgd.run(getPlugins());
+
+                                        // obtain topologically sorted list and overwrite the list
+                                        for (PluginWrapper p : cgd.getSorted()) {
+                                            if (p.isActive()) {
+                                                activePlugins.add(p);
+                                                ((UberClassLoader) uberClassLoader).clearCacheMisses();
+                                            }
+                                        }
+                                    } catch (CycleDetectedException e) { // TODO this should be impossible, since we override reactOnCycle to not throw the exception
+                                        stop(); // disable all plugins since classloading from them can lead to StackOverflow
+                                        throw e;    // let Hudson fail
+                                    }
+                                }
+                            });
+
+                            session.addAll(g.discoverTasks(session));
+
+                            pluginListed = true; // technically speaking this is still too early, as at this point tasks are merely scheduled, not necessarily executed.
+                        }
+                    });
+                }
+            };
+        } else {
+            builder = TaskBuilder.EMPTY_BUILDER;
+        }
+
+        final InitializerFinder initializerFinder = new InitializerFinder(uberClassLoader);        // misc. stuff
+
+        // lists up initialization tasks about loading plugins.
+        return TaskBuilder.union(initializerFinder, // this scans @Initializer in the core once
+                builder, new TaskGraphBuilder() {{
+            requires(PLUGINS_LISTED).attains(PLUGINS_PREPARED).add("Loading plugins", new Executable() {
+                /**
+                 * Once the plugins are listed, schedule their initialization.
+                 */
+                @Override
+                public void run(Reactor session) throws Exception {
+                    Jenkins.get().lookup.set(PluginInstanceStore.class, new PluginInstanceStore());
+                    TaskGraphBuilder g = new TaskGraphBuilder();
+
+                    // schedule execution of loading plugins
+                    for (final PluginWrapper p : activePlugins.toArray(new PluginWrapper[0])) {
+                        g.followedBy().notFatal().attains(PLUGINS_PREPARED).add(String.format("Loading plugin %s v%s (%s)", p.getLongName(), p.getVersion(), p.getShortName()), new Executable() {
+                            @Override
+                            public void run(Reactor session) throws Exception {
+                                try {
+                                    p.resolvePluginDependencies();
+                                    strategy.load(p);
+                                } catch (MissingDependencyException e) {
+                                    failedPlugins.add(new FailedPlugin(p, e));
+                                    activePlugins.remove(p);
+                                    plugins.remove(p);
+                                    p.releaseClassLoader();
+                                    LOGGER.log(Level.SEVERE, "Failed to install {0}: {1}", new Object[] { p.getShortName(), e.getMessage() });
+                                } catch (IOException e) {
+                                    failedPlugins.add(new FailedPlugin(p, e));
+                                    activePlugins.remove(p);
+                                    plugins.remove(p);
+                                    p.releaseClassLoader();
+                                    throw e;
+                                }
+                            }
+                        });
+                    }
+
+                    // schedule execution of initializing plugins
+                    for (final PluginWrapper p : activePlugins.toArray(new PluginWrapper[0])) {
+                        g.followedBy().notFatal().attains(PLUGINS_STARTED).add("Initializing plugin " + p.getShortName(), new Executable() {
+                            @Override
+                            public void run(Reactor session) throws Exception {
+                                if (!activePlugins.contains(p)) {
+                                    return;
+                                }
+                                try {
+                                    p.getPluginOrFail().postInitialize();
+                                } catch (Exception e) {
+                                    failedPlugins.add(new FailedPlugin(p, e));
+                                    activePlugins.remove(p);
+                                    plugins.remove(p);
+                                    p.releaseClassLoader();
+                                    throw e;
+                                }
+                            }
+                        });
+                    }
+
+                    g.followedBy().attains(PLUGINS_STARTED).add("Discovering plugin initialization tasks", new Executable() {
+                        @Override
+                        public void run(Reactor reactor) throws Exception {
+                            // rescan to find plugin-contributed @Initializer
+                            reactor.addAll(initializerFinder.discoverTasks(reactor));
+                        }
+                    });
+
+                    // register them all
+                    session.addAll(g.discoverTasks(session));
+                }
+            });
+
+            // All plugins are loaded. Now we can figure out who depends on who.
+            requires(PLUGINS_PREPARED).attains(COMPLETED).add("Resolving Dependent Plugins Graph", new Executable() {
+                @Override
+                public void run(Reactor reactor) throws Exception {
+                    resolveDependentPlugins();
+                }
+            });
+        }});
+    }
+
 
