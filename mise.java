@@ -910,5 +910,20 @@ public final class JdbcOneTimeTokenService implements OneTimeTokenService, Dispo
             });
         }});
     }
+public final class DefaultBearerTokenResolver implements BearerTokenResolver {
+
+
+	@Override
+	public String resolve(final HttpServletRequest request) {
+		// @formatter:off
+		return resolveToken(
+			resolveFromAuthorizationHeader(request),
+			resolveAccessTokenFromQueryString(request),
+			resolveAccessTokenFromBody(request)
+		);
+		// @formatter:on
+	}
+
+}
 
 
