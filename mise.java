@@ -2106,6 +2106,56 @@ public abstract class AbstractJdbiExecutor implements JdbiExecutor {
     }
 }
 
+  static class MemoizingSupplier<T extends @Nullable Object> implements Supplier<T>, Serializable {
+    private transient Object lock = new Object();
+
+    final Supplier<T> delegate;
+    transient volatile boolean initialized;
+    // "value" does not need to be volatile; visibility piggy-backs
+    // on volatile read of "initialized".
+    transient @Nullable T value;
+
+    MemoizingSupplier(Supplier<T> delegate) {
+      this.delegate = checkNotNull(delegate);
+    }
+
+    @Override
+    @ParametricNullness
+    // We set the field only once (during construction or deserialization).
+    @SuppressWarnings("SynchronizeOnNonFinalField")
+    public T get() {
+      // A 2-field variant of Double Checked Locking.
+      if (!initialized) {
+        synchronized (lock) {
+          if (!initialized) {
+            T t = delegate.get();
+            value = t;
+            initialized = true;
+            return t;
+          }
+        }
+      }
+      // This is safe because we checked `initialized`.
+      return uncheckedCastNullableTToT(value);
+    }
+
+    @Override
+    public String toString() {
+      return "Suppliers.memoize("
+          + (initialized ? "<supplier that returned " + value + ">" : delegate)
+          + ")";
+    }
+
+    @GwtIncompatible // serialization
+    @J2ktIncompatible // serialization
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+      in.defaultReadObject();
+      lock = new Object();
+    }
+
+    @GwtIncompatible @J2ktIncompatible private static final long serialVersionUID = 0;
+  } 
+
 
 
 
