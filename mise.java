@@ -2772,6 +2772,59 @@ public final class SingleThreadOrchestrator implements ObservableOrchestrator {
         }
     }
 }
+//很巧妙的filter and写法
+	private static final class DefaultGroups<CB> implements HttpServiceGroupConfigurer.Groups<CB> {
+
+		private final Set<ConfigurableGroup> groups;
+
+		private final Predicate<ConfigurableGroup> clientTypeFilter;
+
+		private Predicate<ConfigurableGroup> filter;
+
+		DefaultGroups(Set<ConfigurableGroup> groups, HttpServiceGroup.ClientType clientType) {
+			this.groups = groups;
+			this.clientTypeFilter = (group -> group.httpServiceGroup().clientType().equals(clientType));
+			this.filter = this.clientTypeFilter;
+		}
+
+		@Override
+		public HttpServiceGroupConfigurer.Groups<CB> filterByName(String... groupNames) {
+			return filter(group -> Arrays.stream(groupNames).anyMatch(name -> name.equals(group.name())));
+		}
+
+		@Override
+		public HttpServiceGroupConfigurer.Groups<CB> filter(Predicate<HttpServiceGroup> predicate) {
+			this.filter = this.filter.and(group -> predicate.test(group.httpServiceGroup()));
+			return this;
+		}
+
+		@Override
+		public void forEachClient(HttpServiceGroupConfigurer.ClientCallback<CB> callback) {
+			filterAndReset().forEach(group -> group.applyClientCallback(callback));
+		}
+
+		@Override
+		public void forEachClient(HttpServiceGroupConfigurer.InitializingClientCallback<CB> callback) {
+			filterAndReset().forEach(group -> group.applyClientCallback(callback));
+		}
+
+		@Override
+		public void forEachProxyFactory(HttpServiceGroupConfigurer.ProxyFactoryCallback callback) {
+			filterAndReset().forEach(group -> group.applyProxyFactoryCallback(callback));
+		}
+
+		@Override
+		public void forEachGroup(HttpServiceGroupConfigurer.GroupCallback<CB> callback) {
+			filterAndReset().forEach(group -> group.applyGroupCallback(callback));
+		}
+
+		private Stream<ConfigurableGroup> filterAndReset() {
+			Stream<ConfigurableGroup> stream = this.groups.stream().filter(this.filter);
+			this.filter = this.clientTypeFilter;
+			return stream;
+		}
+	}
+
 
 
 
