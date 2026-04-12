@@ -2826,6 +2826,27 @@ public final class SingleThreadOrchestrator implements ObservableOrchestrator {
 	}
 
 
+//注意下面的有肯只有一个的判断
+ public Session(URI serverUri) {
+        this.serverUri = requireNonNull(serverUri, "serverUri");
+
+        if (GENERIC_PROVIDER.accepts(serverUri)) {
+            provider = GENERIC_PROVIDER;
+            return;
+        }
+
+        var providers = ServiceLoader.load(AcmeProvider.class);
+        provider = StreamSupport.stream(providers.spliterator(), false)
+            .filter(p -> p.accepts(serverUri))
+            .reduce((a, b) -> {
+                    throw new IllegalArgumentException("Both ACME providers "
+                        + a.getClass().getSimpleName() + " and "
+                        + b.getClass().getSimpleName() + " accept "
+                        + serverUri + ". Please check your classpath.");
+                })
+            .orElseThrow(() -> new IllegalArgumentException("No ACME provider found for " + serverUri));
+    }
+
 
 
 
