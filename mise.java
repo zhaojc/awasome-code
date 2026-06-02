@@ -2847,6 +2847,31 @@ public final class SingleThreadOrchestrator implements ObservableOrchestrator {
             .orElseThrow(() -> new IllegalArgumentException("No ACME provider found for " + serverUri));
     }
 
+	@Override
+	public ToolCallback[] getToolCallbacks() {
+		var toolCallbacks = this.toolObjects.stream()
+			.map(toolObject -> Stream
+				.of(ReflectionUtils.getDeclaredMethods(
+						AopUtils.isAopProxy(toolObject) ? AopUtils.getTargetClass(toolObject) : toolObject.getClass()))
+				.filter(this::isToolAnnotatedMethod)
+				.filter(toolMethod -> !isFunctionalType(toolMethod))
+				.filter(ReflectionUtils.USER_DECLARED_METHODS::matches)
+				.map(toolMethod -> MethodToolCallback.builder()
+					.toolDefinition(ToolDefinitions.from(toolMethod))
+					.toolMetadata(ToolMetadata.from(toolMethod))
+					.toolMethod(toolMethod)
+					.toolObject(toolObject)
+					.toolCallResultConverter(ToolUtils.getToolCallResultConverter(toolMethod))
+					.build())
+				.toArray(ToolCallback[]::new))
+			.flatMap(Stream::of)
+			.toArray(ToolCallback[]::new);
+
+		validateToolCallbacks(toolCallbacks);
+
+		return toolCallbacks;
+	}
+
 
 
 
