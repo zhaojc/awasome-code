@@ -2968,6 +2968,45 @@ public class HttpPipelineNextPolicy {
     }
 }
 
+@JsonTypeInfo(
+    use = JsonTypeInfo.Id.NAME,
+    property = "event_type",
+    defaultImpl = GenericEvent.class,
+    visible = true,
+    include = JsonTypeInfo.As.EXISTING_PROPERTY
+)
+@JsonSubTypes({
+    @JsonSubTypes.Type(
+        value = RuleOkEvent.class,
+        name = RuleOkEvent.EVENT_TYPE
+    ),
+    @JsonSubTypes.Type(
+        value = TransferFailedEvent.class,
+        name = TransferFailedEvent.EVENT_TYPE
+    )
+})
+@Data
+@AllArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public abstract class Event<T extends EventPayload> {
+
+  @JsonProperty("event_type")
+  @NonNull
+  @NotNull
+  private String eventType;
+
+  @JsonProperty("created_at")
+  @NonNull
+  @NotNull
+  private String createdAt;
+
+  @JsonProperty("payload")
+  @NonNull
+  @NotNull
+  private T payload;
+
+}
+
 
 
 
